@@ -1,0 +1,80 @@
+# THEME SPECIFICATION: LEXIDESK (PROFESSIONAL SAAS)
+# File: theme.txt
+# Purpose: Global design system guidelines for frontend development.
+
+## 1. CORE COLOR PALETTE (CSS VARIABLES)
+These colors form the foundation of the UI. The palette balances a warm, approachable background with a strong, trustworthy primary blue-purple, using reds for high-contrast alerts and deadlines.
+
+:root {
+  /* Base Backgrounds */
+  --background: #F3EFEF;         /* App background: Warm, low-strain off-white */
+  --card: #FAF8F8;               /* Cards/Panels: Slightly elevated, clean white-gray */
+  
+  /* Text & Typography */
+  --foreground: #444349;         /* Primary text: Soft charcoal (reduces eye strain compared to pure black) */
+  --card-foreground: #444349;    /* Card text: Matches primary text */
+  --muted-foreground: #56545A;   /* Secondary text: Used for timestamps, hints, subheaders */
+  
+  /* UI Elements */
+  --border: #DBD7D8;             /* Dividers, input borders, and table borders */
+  
+  /* Brand & Actions */
+  --primary: #422EC3;            /* Brand color: Trustworthy deep blue-purple. Use for primary buttons, active states, key links */
+  --primary-foreground: #FFFFFF; /* Text on primary buttons */
+  
+  /* Badges & Highlights */
+  --secondary: #E84430;          /* Vibrant red-orange. Use for "Pending" badges, active notifications, secondary action highlights */
+  --secondary-foreground: #FFFFFF; /* Adjusted to White for readable contrast against vibrant red */
+  
+  /* Critical Actions */
+  --accent: #AC1F19;             /* Deep crimson. Use for urgent deadlines, "Overdue" status, destructive actions (Delete) */
+  --accent-foreground: #FFFFFF;  /* Text on accent elements */
+  
+  /* System Status (Derived) */
+  --success: #10B981;            /* Verified documents, completed tasks */
+  --success-foreground: #FFFFFF;
+  --warning: #F59E0B;            /* Needs review, expiring links */
+}
+
+## 2. TYPOGRAPHY
+* Primary Font Family: 'Inter', system-ui, sans-serif
+* Base Font Size: 14px (Slightly compact for data-dense dashboards)
+* Weights:
+  * Regular (400): Standard body text and table data.
+  * Medium (500): Table headers, secondary buttons, input labels.
+  * Semi-Bold (600): Primary buttons, card titles, client names.
+  * Bold (700): Page headers, critical numbers in metrics.
+
+## 3. GEOMETRY & SPACING
+* Border Radius: 
+  * `--radius-sm: 4px` (Checkboxes, small tags)
+  * `--radius-md: 8px` (Inputs, buttons, dropdowns)
+  * `--radius-lg: 12px` (Main cards, modal windows, dialogs)
+* Spacing Scale (Tailwind standard):
+  * App padding: 24px (p-6)
+  * Card padding: 20px (p-5)
+  * Component gap: 8px (gap-2) to 16px (gap-4)
+
+## 4. SHADOWS & ELEVATION
+Depth is created through subtle shadows rather than harsh borders, maintaining the clean aesthetic.
+* Level 1 (Cards, Dropdowns): `0 2px 8px -2px rgba(68, 67, 73, 0.08)`
+* Level 2 (Modals, Slide-outs): `0 12px 24px -4px rgba(68, 67, 73, 0.12)`
+* Level 3 (Sticky Headers/Floating Action Buttons): `0 4px 12px rgba(66, 46, 195, 0.2)` (Primary colored shadow for the global notes button)
+
+## 5. COMPONENT MAPPING RULES
+* Dashboard Background: Always use `--background`.
+* Navigation Sidebar: Use `--card` with a right border of `--border`, or invert to use `--foreground` for a dark sidebar.
+* Client Cards: Use `--card` background. Hover states should slightly lift the shadow, not change the background color.
+* Primary Buttons: Background `--primary`, hover state darkens by 10%.
+* Inputs/Textareas: Background `--card`, border `--border`. On focus, ring with `--primary` at 30% opacity.
+* Status Badges:
+  * "Action Required" / "Missing": Background `--secondary` (10% opacity), Text `--secondary`.
+  * "Verified" / "Done": Background `--success` (10% opacity), Text `--success`.
+  * "Urgent": Background `--accent`, Text `--accent-foreground`.
+
+## 6. DARK MODE EQUIVALENTS (Optional/Future-Proofing)
+If dark mode is toggled, do not invert colors mathematically. Use these targets:
+* Background: `#121214`
+* Card: `#1C1C1F`
+* Foreground: `#EDEDED`
+* Primary: Keep `#422EC3` but lighten to `#5A48D6` for better contrast.
