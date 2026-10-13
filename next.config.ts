@@ -2,11 +2,15 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
     async rewrites() {
-        const backendUrl = process.env.BACKEND_URL ?? "http://localhost:5000";
+        // Provide the live Azure backend URL as the fallback for the GitHub Actions build
+        const backendUrl =
+            process.env.BACKEND_URL ||
+            "https://lexidesk-api-backend-fkg9fqgwfjg8hbgj.indiasouthcentral-01.azurewebsites.net";
+
         return [
             {
                 source: "/server/:path*",
-                destination: `${process.env.BACKEND_URL}/api/:path*`,
+                destination: `${backendUrl}/api/:path*`,
             },
         ];
     },
