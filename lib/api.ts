@@ -231,6 +231,16 @@ export async function fetchClientById(
     return data;
 }
 
+export async function updateClientStatus(
+    id: string,
+    status: "ACTION_NEEDED" | "WAITING_ON_CLIENT" | "UP_TO_DATE" | "CLOSED",
+): Promise<ClientItem> {
+    const { data } = await api.patch<ClientItem>(`/clients/${id}/status`, {
+        status,
+    });
+    return data;
+}
+
 export async function updateClientScratchpad(
     id: string,
     scratchpad: string,
