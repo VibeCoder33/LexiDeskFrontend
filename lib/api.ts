@@ -231,6 +231,24 @@ export async function fetchClientById(
     return data;
 }
 
+export interface UpdateClientPayload {
+    name?: string;
+    phone?: string;
+    matterType?: string;
+    details?: Record<string, unknown>;
+    keyDate?: string | null;
+    keyDateLabel?: string | null;
+    isBilled?: boolean;
+}
+
+export async function updateClient(
+    id: string,
+    payload: UpdateClientPayload,
+): Promise<ClientDetailResponse> {
+    const { data } = await api.patch<ClientDetailResponse>(`/clients/${id}`, payload);
+    return data;
+}
+
 export async function updateClientStatus(
     id: string,
     status: "ACTION_NEEDED" | "WAITING_ON_CLIENT" | "UP_TO_DATE" | "CLOSED",

@@ -24,8 +24,18 @@ export function middleware(request: NextRequest) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // 3. Login page: redirect to /dashboard if already authenticated
+    // 3. Login page: redirect to /dashboard if already authenticated (unless explicit logout)
     if (pathname === "/login") {
+        if (request.nextUrl.searchParams.get("logout") === "true") {
+            const response = NextResponse.next();
+            response.cookies.delete("auth_token");
+            response.cookies.set("auth_token", "", {
+                path: "/",
+                maxAge: 0,
+                expires: new Date(0),
+            });
+            return response;
+        }
         if (authToken) {
             return NextResponse.redirect(new URL("/dashboard", request.url));
         }
