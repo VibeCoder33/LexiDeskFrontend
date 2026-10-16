@@ -5,6 +5,7 @@ import Link from "next/link";
 import useSWR from "swr";
 import {
     ClientDetailResponse,
+    DocumentItem,
     fetchClientById,
     updateClient,
     updateClientScratchpad,
@@ -59,9 +60,10 @@ import {
     X,
     Save,
     Clock,
-    Share2,
     Layers,
     MessageCircle,
+    HelpCircle,
+    Tag,
 } from "lucide-react";
 
 interface ClientWorkspaceViewProps {
@@ -107,7 +109,6 @@ export function ClientWorkspaceView({
     const [editKeyDateLabel, setEditKeyDateLabel] = React.useState("");
     const [editDetails, setEditDetails] = React.useState<DetailFieldRow[]>([]);
 
-    // Initialize edit fields when entering edit mode or when data loads
     const startEditing = () => {
         if (!data) return;
         setEditName(data.name || "");
@@ -324,6 +325,84 @@ export function ClientWorkspaceView({
         }
     };
 
+    // ── Predefined vs Uncategorized Documents Logic ─────────────────────────
+    // Predefined categories come from requirements or role configuration (excluding Uncategorized and Other)
+    const predefinedCategories = React.useMemo(() => {
+        if (!data) return [];
+        const cats = new Set<string>();
+        data.requirements.forEach((r) => {
+            if (
+                r.category &&
+                r.category !== "Uncategorized" &&
+                r.category !== "Other"
+            ) {
+                cats.add(r.category);
+            }
+        });
+        if (roleConfig?.documentCategories) {
+            roleConfig.documentCategories.forEach((c) => {
+                if (c !== "Other" && c !== "Uncategorized") {
+                    cats.add(c);
+                }
+            });
+        }
+        return Array.from(cats);
+    }, [data, roleConfig]);
+
+    // Check if a document is genuinely categorized in a predefined category
+    const isDocGenuinelyCategorized = React.useCallback(
+        (doc: DocumentItem): boolean => {
+            if (
+                !doc.category ||
+                doc.category === "Uncategorized" ||
+                doc.category === "Other"
+            ) {
+                return false;
+            }
+            if (doc.detectedType === "UNRECOGNIZED_DOCUMENT") {
+                return false;
+            }
+            if (!predefinedCategories.includes(doc.category)) {
+                return false;
+            }
+
+            // Guard against legacy misclassified documents (e.g. concept notes in ID Proofs)
+            const fn = doc.fileName.toLowerCase();
+            const isIdentity =
+                fn.includes("pan") ||
+                fn.includes("aadhaar") ||
+                fn.includes("aadhar") ||
+                fn.includes("passport") ||
+                fn.includes("voter") ||
+                fn.includes("driving") ||
+                fn.includes("identity");
+            const isConceptOrUnknown =
+                fn.includes("concept") ||
+                fn.includes("ai_") ||
+                fn.includes("ai ") ||
+                fn.includes("unknown") ||
+                fn.includes("notes");
+
+            if (
+                doc.category.toLowerCase().includes("id") &&
+                isConceptOrUnknown &&
+                !isIdentity
+            ) {
+                return false;
+            }
+
+            return true;
+        },
+        [predefinedCategories],
+    );
+
+    // Filter documents into genuine category items vs uncategorized items
+    const uncategorizedDocs = React.useMemo(() => {
+        return (data?.documents || []).filter(
+            (d) => !isDocGenuinelyCategorized(d),
+        );
+    }, [data?.documents, isDocGenuinelyCategorized]);
+
     // ── Collapsible Document Categories State ───────────────────────────────
     const [collapsedCategories, setCollapsedCategories] = React.useState<
         Record<string, boolean>
@@ -336,30 +415,44 @@ export function ClientWorkspaceView({
         }));
     };
 
-    // Group documents by category
-    const categories = React.useMemo(() => {
-        if (!data) return [];
-        return Array.from(
-            new Set([
-                ...data.requirements.map((r) => r.category),
-                ...data.documents.map((d) => d.category),
-            ]),
-        );
-    }, [data]);
-
     const areAllCollapsed =
-        categories.length > 0 &&
-        categories.every((cat) => Boolean(collapsedCategories[cat]));
+        predefinedCategories.length > 0 &&
+        predefinedCategories.every((cat) => Boolean(collapsedCategories[cat])) &&
+        Boolean(collapsedCategories["Uncategorized"]);
 
     const toggleAllCategories = () => {
         if (areAllCollapsed) {
             setCollapsedCategories({});
         } else {
-            const next: Record<string, boolean> = {};
-            categories.forEach((cat) => {
+            const next: Record<string, boolean> = { Uncategorized: true };
+            predefinedCategories.forEach((cat) => {
                 next[cat] = true;
             });
             setCollapsedCategories(next);
+        }
+    };
+
+    // ── Reassign / Categorize Document Handler ──────────────────────────────
+    const handleAssignCategory = async (docId: string, newCategory: string) => {
+        if (!newCategory) return;
+        try {
+            await updateDocument(docId, {
+                category: newCategory,
+                verification:
+                    newCategory === "Uncategorized" ? "NEEDS_REVIEW" : "VERIFIED",
+                verificationNote:
+                    newCategory === "Uncategorized"
+                        ? "Moved to Uncategorized for review"
+                        : `Classified to ${newCategory} by lawyer`,
+            });
+            toast.success(
+                newCategory === "Uncategorized"
+                    ? "Document moved to Uncategorized section"
+                    : `Document assigned to ${newCategory}`,
+            );
+            mutate();
+        } catch (err: unknown) {
+            toast.error(formatApiError(err));
         }
     };
 
@@ -387,7 +480,7 @@ export function ClientWorkspaceView({
                 try {
                     const res = await fetchDocumentPreviewUrl(doc.id);
                     setPreviewUrl(res.previewUrl);
-                    mutate(); // Marks reviewed
+                    mutate();
                 } catch (err: unknown) {
                     toast.error(formatApiError(err));
                 } finally {
@@ -403,7 +496,6 @@ export function ClientWorkspaceView({
         setPreviewUrl(null);
     };
 
-    // Keyboard navigation for preview modal (Left, Right, Esc)
     React.useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (previewDocIndex === null) return;
@@ -523,6 +615,8 @@ export function ClientWorkspaceView({
                         CENTER COLUMN:
                         1. Case Details & Deadlines (Editable by Lawyer)
                         2. Collapsible Document Vault Below
+                           - Predefined categories (genuinely categorized docs)
+                           - Separate Collapsible Dropdown for Uncategorized docs
                     ══════════════════════════════════════════════════════════════ */}
                     <div className="lg:col-span-8 space-y-6">
                         {/* ── Center Box 1: Case Details & Deadlines ── */}
@@ -1030,7 +1124,7 @@ export function ClientWorkspaceView({
                             </CardContent>
                         </Card>
 
-                        {/* ── Center Box 2: Smart Document Vault (Collapsible Categories) ── */}
+                        {/* ── Center Box 2: Smart Document Vault ── */}
                         <div className="space-y-4">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                                 <div className="flex items-center gap-2">
@@ -1041,7 +1135,7 @@ export function ClientWorkspaceView({
                                         Documents & Verification Vault
                                     </h2>
                                     <span className="text-xs text-[var(--muted-foreground)] font-medium">
-                                        ({data.documents.length} files uploaded)
+                                        ({data.documents.length} total files)
                                     </span>
                                 </div>
 
@@ -1062,15 +1156,18 @@ export function ClientWorkspaceView({
                                 </div>
                             </div>
 
-                            {/* Bundled Collapsible Document Category Cards */}
+                            {/* ── Predefined Document Categories ── */}
                             <div className="space-y-3">
-                                {categories.map((category) => {
+                                {predefinedCategories.map((category) => {
                                     const categoryReqs =
                                         data.requirements.filter(
                                             (r) => r.category === category,
                                         );
+                                    // ONLY documents that genuinely belong to this category
                                     const categoryDocs = data.documents.filter(
-                                        (d) => d.category === category,
+                                        (d) =>
+                                            d.category === category &&
+                                            isDocGenuinelyCategorized(d),
                                     );
                                     const isCollapsed = Boolean(
                                         collapsedCategories[category],
@@ -1081,7 +1178,8 @@ export function ClientWorkspaceView({
                                         (r) =>
                                             !data.documents.some(
                                                 (d) =>
-                                                    d.requirementId === r.id,
+                                                    d.requirementId === r.id &&
+                                                    isDocGenuinelyCategorized(d),
                                             ),
                                     ).length;
                                     const verifiedCount = categoryDocs.filter(
@@ -1166,7 +1264,10 @@ export function ClientWorkspaceView({
                                                             data.documents.find(
                                                                 (d) =>
                                                                     d.requirementId ===
-                                                                    req.id,
+                                                                        req.id &&
+                                                                    isDocGenuinelyCategorized(
+                                                                        d,
+                                                                    ),
                                                             );
                                                         return (
                                                             <div
@@ -1216,7 +1317,7 @@ export function ClientWorkspaceView({
                                                         );
                                                     })}
 
-                                                    {/* Documents in this category */}
+                                                    {/* Documents genuinely in this category */}
                                                     {categoryDocs.length === 0 ? (
                                                         <div className="p-3 pl-6 text-xs text-[var(--muted-foreground)] italic bg-[var(--card)]">
                                                             No files uploaded yet in
@@ -1233,9 +1334,9 @@ export function ClientWorkspaceView({
                                                             return (
                                                                 <div
                                                                     key={doc.id}
-                                                                    className="p-3 pl-6 flex items-center justify-between gap-3 bg-[var(--card)] hover:bg-[var(--muted)]/50 transition-colors group"
+                                                                    className="p-3 pl-6 flex items-center justify-between gap-3 bg-[var(--card)] hover:bg-[var(--muted)]/50 transition-colors group flex-wrap sm:flex-nowrap"
                                                                 >
-                                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                                                         <FileText className="w-4 h-4 text-[var(--primary)] shrink-0" />
                                                                         <div className="min-w-0">
                                                                             <span className="font-semibold text-[var(--foreground)] block truncate">
@@ -1243,7 +1344,7 @@ export function ClientWorkspaceView({
                                                                                     doc.fileName
                                                                                 }
                                                                             </span>
-                                                                            <div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+                                                                            <div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)] flex-wrap">
                                                                                 <span>
                                                                                     {(
                                                                                         doc.sizeBytes /
@@ -1274,7 +1375,7 @@ export function ClientWorkspaceView({
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                    <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                                                                         <Button
                                                                             size="sm"
                                                                             variant="outline"
@@ -1291,6 +1392,60 @@ export function ClientWorkspaceView({
                                                                                 Preview
                                                                             </span>
                                                                         </Button>
+
+                                                                        {/* Category Reassign Dropdown */}
+                                                                        <select
+                                                                            value=""
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                handleAssignCategory(
+                                                                                    doc.id,
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            className="h-7 text-[11px] rounded border border-[var(--border)] bg-[var(--card)] px-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] outline-none cursor-pointer"
+                                                                            title="Move document to another category"
+                                                                        >
+                                                                            <option
+                                                                                value=""
+                                                                                disabled
+                                                                            >
+                                                                                Move
+                                                                                to…
+                                                                            </option>
+                                                                            {predefinedCategories
+                                                                                .filter(
+                                                                                    (
+                                                                                        c,
+                                                                                    ) =>
+                                                                                        c !==
+                                                                                        category,
+                                                                                )
+                                                                                .map(
+                                                                                    (
+                                                                                        cat,
+                                                                                    ) => (
+                                                                                        <option
+                                                                                            key={
+                                                                                                cat
+                                                                                            }
+                                                                                            value={
+                                                                                                cat
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                cat
+                                                                                            }
+                                                                                        </option>
+                                                                                    ),
+                                                                                )}
+                                                                            <option value="Uncategorized">
+                                                                                Uncategorized
+                                                                            </option>
+                                                                        </select>
 
                                                                         {doc.verification ===
                                                                             "NEEDS_REVIEW" && (
@@ -1333,6 +1488,241 @@ export function ClientWorkspaceView({
                                     );
                                 })}
                             </div>
+
+                            {/* ── Separate Collapsible Section for Uncategorized Documents ── */}
+                            <Card className="bg-[var(--card)] border border-[color-mix(in_srgb,var(--border)_80%,transparent)] overflow-hidden shadow-xs">
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        toggleCategoryCollapse("Uncategorized")
+                                    }
+                                    className="w-full py-2.5 px-4 bg-[color-mix(in_srgb,var(--muted)_40%,var(--background))] hover:bg-[var(--muted)]/60 border-b border-[var(--border)] flex items-center justify-between text-left transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
+                                >
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <ChevronDown
+                                            className={`w-4 h-4 text-[var(--muted-foreground)] shrink-0 transition-transform duration-200 ${
+                                                collapsedCategories["Uncategorized"]
+                                                    ? "-rotate-90"
+                                                    : "rotate-0"
+                                            }`}
+                                        />
+                                        <div className="p-1 rounded bg-[color-mix(in_srgb,var(--secondary)_15%,transparent)] text-[var(--secondary)] shrink-0">
+                                            <HelpCircle className="w-3.5 h-3.5" />
+                                        </div>
+                                        <span className="text-xs font-bold text-[var(--foreground)]">
+                                            Uncategorized & Miscellaneous
+                                            Documents
+                                        </span>
+                                        <span className="text-[11px] text-[var(--muted-foreground)] font-medium">
+                                            ({uncategorizedDocs.length}{" "}
+                                            {uncategorizedDocs.length === 1
+                                                ? "file"
+                                                : "files"}
+                                            )
+                                        </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        {uncategorizedDocs.length > 0 ? (
+                                            <StatusBadge
+                                                variant="warning"
+                                                className="text-[10px] py-0 px-1.5"
+                                            >
+                                                ⚠️ {uncategorizedDocs.length} to
+                                                classify
+                                            </StatusBadge>
+                                        ) : (
+                                            <StatusBadge
+                                                variant="muted"
+                                                className="text-[10px] py-0 px-1.5"
+                                            >
+                                                Clean (0 files)
+                                            </StatusBadge>
+                                        )}
+                                    </div>
+                                </button>
+
+                                {!collapsedCategories["Uncategorized"] && (
+                                    <CardContent className="p-0 divide-y divide-[var(--border)] text-xs">
+                                        {uncategorizedDocs.length > 0 ? (
+                                            <>
+                                                <div className="p-3 bg-[color-mix(in_srgb,var(--background)_60%,transparent)] text-xs text-[var(--muted-foreground)] flex items-start gap-2 border-b border-[var(--border)]">
+                                                    <Tag className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 mt-0.5" />
+                                                    <span>
+                                                        The following files could
+                                                        not be automatically
+                                                        matched to predefined case
+                                                        categories (e.g. concept
+                                                        notes, miscellaneous
+                                                        scans). Preview them below or
+                                                        reassign them using the{" "}
+                                                        <strong>
+                                                            Assign Category
+                                                        </strong>{" "}
+                                                        dropdown.
+                                                    </span>
+                                                </div>
+
+                                                {uncategorizedDocs.map((doc) => {
+                                                    const globalIndex =
+                                                        allDocuments.findIndex(
+                                                            (d) => d.id === doc.id,
+                                                        );
+                                                    return (
+                                                        <div
+                                                            key={doc.id}
+                                                            className="p-3 pl-6 flex items-center justify-between gap-3 bg-[var(--card)] hover:bg-[var(--muted)]/50 transition-colors group flex-wrap sm:flex-nowrap"
+                                                        >
+                                                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                                                <FileText className="w-4 h-4 text-[var(--secondary)] shrink-0" />
+                                                                <div className="min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="font-semibold text-[var(--foreground)] block truncate">
+                                                                            {
+                                                                                doc.fileName
+                                                                            }
+                                                                        </span>
+                                                                        <StatusBadge
+                                                                            variant="warning"
+                                                                            className="text-[9px] py-0 px-1"
+                                                                        >
+                                                                            Uncategorized
+                                                                        </StatusBadge>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)] flex-wrap">
+                                                                        <span>
+                                                                            {(
+                                                                                doc.sizeBytes /
+                                                                                1024
+                                                                            ).toFixed(
+                                                                                0,
+                                                                            )}{" "}
+                                                                            KB
+                                                                        </span>
+                                                                        <span>
+                                                                            &bull;{" "}
+                                                                            AI:{" "}
+                                                                            {doc.detectedType ||
+                                                                                "Unrecognized"}
+                                                                        </span>
+                                                                        {doc.verificationNote && (
+                                                                            <span className="text-[var(--secondary)] truncate max-w-sm font-medium">
+                                                                                &bull;{" "}
+                                                                                {
+                                                                                    doc.verificationNote
+                                                                                }
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() =>
+                                                                        openPreview(
+                                                                            globalIndex,
+                                                                        )
+                                                                    }
+                                                                    className="h-7 text-xs px-2 gap-1 bg-[var(--card)] hover:bg-[var(--background)]"
+                                                                    title="Open preview modal"
+                                                                >
+                                                                    <Eye className="w-3 h-3" />
+                                                                    <span>
+                                                                        Preview
+                                                                    </span>
+                                                                </Button>
+
+                                                                {/* Assign Category Action Dropdown */}
+                                                                <select
+                                                                    value=""
+                                                                    onChange={(e) =>
+                                                                        handleAssignCategory(
+                                                                            doc.id,
+                                                                            e.target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    className="h-7 text-[11px] rounded border border-[var(--border)] bg-[var(--card)] px-1.5 text-[var(--primary)] font-medium hover:bg-[var(--muted)] outline-none cursor-pointer"
+                                                                    title="Assign this file to a category"
+                                                                >
+                                                                    <option
+                                                                        value=""
+                                                                        disabled
+                                                                    >
+                                                                        Assign
+                                                                        Category ▾
+                                                                    </option>
+                                                                    {predefinedCategories.map(
+                                                                        (
+                                                                            cat,
+                                                                        ) => (
+                                                                            <option
+                                                                                key={
+                                                                                    cat
+                                                                                }
+                                                                                value={
+                                                                                    cat
+                                                                                }
+                                                                            >
+                                                                                Move
+                                                                                to{" "}
+                                                                                {
+                                                                                    cat
+                                                                                }
+                                                                            </option>
+                                                                        ),
+                                                                    )}
+                                                                </select>
+
+                                                                {doc.verification ===
+                                                                    "NEEDS_REVIEW" && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() =>
+                                                                            handleOverrideStatus(
+                                                                                doc.id,
+                                                                                "VERIFIED",
+                                                                            )
+                                                                        }
+                                                                        className="h-7 text-[11px] px-2 text-[#059669] border-[#059669] hover:bg-[color-mix(in_srgb,var(--success)_10%,transparent)]"
+                                                                        title="Manually verify document"
+                                                                    >
+                                                                        Verify
+                                                                    </Button>
+                                                                )}
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        handleDeleteDoc(
+                                                                            doc.id,
+                                                                        )
+                                                                    }
+                                                                    className="opacity-0 group-hover:opacity-100 text-[var(--muted-foreground)] hover:text-[var(--accent)] p-1 rounded transition-opacity cursor-pointer"
+                                                                    title="Delete document"
+                                                                >
+                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </>
+                                        ) : (
+                                            <div className="p-4 text-center text-xs text-[var(--muted-foreground)] italic bg-[var(--card)]">
+                                                No uncategorized documents. All
+                                                uploaded files have been recognized
+                                                and placed into their respective
+                                                categories.
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                )}
+                            </Card>
                         </div>
                     </div>
 
